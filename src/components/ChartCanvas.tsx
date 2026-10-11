@@ -65,7 +65,9 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
     drawingColor,
     setDrawingColor,
     showChartButtons,
-    setShowChartButtons
+    setShowChartButtons,
+    lastClosedTrade,
+    clearLastClosedTrade
   } = useTrading();
 
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
@@ -75,7 +77,24 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
   const touchStartDistRef = useRef<number | null>(null);
   const initialZoomRef = useRef<number>(zoomVisibleCount);
 
-  // Interactive Pen Drawing State (Drag or 2-Tap custom line / freehand)
+  // Track exact pixel coordinates of the live candle's close dot so RESULT (P/L) anchors directly to the candle
+  const [liveCandleAnchor, setLiveCandleAnchor] = useState<{
+    x: number;
+    y: number;
+    chartWidth: number;
+    chartHeight: number;
+  }>({ x: 220, y: 180, chartWidth: 360, chartHeight: 360 });
+
+  // Auto-dismiss lastClosedTrade after 7 seconds
+  useEffect(() => {
+    if (!lastClosedTrade) return;
+    const timer = setTimeout(() => {
+      clearLastClosedTrade();
+    }, 7000);
+    return () => clearTimeout(timer);
+  }, [lastClosedTrade, clearLastClosedTrade]);
+
+  // Interactive Pen Drawing State
   const [draftLine, setDraftLine] = useState<{
     type: 'trendline' | 'freehand' | 'horizontal';
     time1: number;
@@ -194,14 +213,16 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
     if (indicators.macd) subChartTotal += 55;
     if (indicators.stoch) subChartTotal += 55;
 
-    const rightPadding = 75;
+    const rightPadding = 72;
     const bottomPadding = 30 + subChartTotal;
     const topPadding = 18;
     const chartWidth = width - rightPadding;
     const chartHeight = height - bottomPadding - topPadding;
 
-    // Dynamic visible candles & horizontal panning
-    const visibleCount = Math.max(14, Math.min(130, zoomVisibleCount));
+    // Position the live candle around ~58% of chartWidth (matching Quotex mobile screenshot!)
+    // so there is open future space on the right for the End of trade line and 00:XX timer pill.
+    const candlesAreaWidth = chartWidth * 0.58;
+    const visibleCount = Math.max(12, Math.min(80, Math.round(zoomVisibleCount * 0.58)));
     const maxPan = Math.max(0, displayCandles.length - visibleCount);
     const clampedPan = Math.max(0, Math.min(maxPan, panOffset));
     const endIdx = displayCandles.length - clampedPan;
@@ -235,14 +256,14 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
     // Add vertical headroom
     const priceRange = maxPrice - minPrice || 0.0005;
-    minPrice -= priceRange * 0.14;
-    maxPrice += priceRange * 0.14;
+    minPrice -= priceRange * 0.16;
+    maxPrice += priceRange * 0.16;
     const expandedRange = maxPrice - minPrice;
 
     // Coordinates helpers
-    const candleWidth = chartWidth / visibleCount;
-    const bodyWidth = Math.max(3, candleWidth * 0.68);
-    const timeframeMs = 60 * 1000; // 1 minute per candle
+    const candleWidth = candlesAreaWidth / visibleCount;
+    const bodyWidth = Math.max(3.5, candleWidth * 0.66);
+    const timeframeMs = 60 * 1000;
     const firstCandleTime = candleSlice[0]?.time || Date.now();
 
     chartDimsRef.current = {
@@ -270,7 +291,20 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       return idxFloat * candleWidth + candleWidth / 2;
     };
 
-    // 1. Subtle Grid Lines
+    // 1. Subtle Background Watermark ("DEMO" or "LIVE" matching screenshot)
+    ctx.save();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.025)';
+    ctx.font = '900 92px "Plus Jakarta Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(
+      accountType === 'REAL' ? 'LIVE' : 'DEMO',
+      chartWidth * 0.52,
+      topPadding + chartHeight * 0.42
+    );
+    ctx.restore();
+
+    // 2. Subtle Grid Lines
     ctx.strokeStyle = '#141a24';
     ctx.lineWidth = 1;
     ctx.setLineDash([]);
@@ -287,14 +321,14 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       ctx.stroke();
 
       // Price labels on right axis
-      ctx.fillStyle = '#64748b';
+      ctx.fillStyle = '#94a3b8';
       ctx.font = '11px "JetBrains Mono", monospace';
       ctx.textAlign = 'left';
-      ctx.fillText(formatPrice(priceAtY, activeAsset.decimalPlaces), chartWidth + 8, y + 4);
+      ctx.fillText(formatPrice(priceAtY, activeAsset.decimalPlaces), chartWidth + 6, y + 4);
     }
 
     // Vertical time grid lines
-    const gridCols = 5;
+    const gridCols = 4;
     for (let i = 0; i <= gridCols; i++) {
       const x = (chartWidth / gridCols) * i;
       ctx.beginPath();
@@ -302,22 +336,17 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       ctx.lineTo(x, topPadding + chartHeight);
       ctx.stroke();
 
-      const candleIndex = Math.min(
-        candleSlice.length - 1,
-        Math.floor((i / gridCols) * candleSlice.length)
-      );
-      if (candleSlice[candleIndex]) {
-        const date = new Date(candleSlice[candleIndex].time);
-        const hours = date.getHours().toString().padStart(2, '0');
-        const minutes = date.getMinutes().toString().padStart(2, '0');
-        ctx.fillStyle = '#64748b';
-        ctx.font = '11px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${hours}:${minutes}`, x, topPadding + chartHeight + 18);
-      }
+      const timeAtX = firstCandleTime + (x / candleWidth) * timeframeMs;
+      const date = new Date(timeAtX);
+      const hours = date.getHours().toString().padStart(2, '0');
+      const minutes = date.getMinutes().toString().padStart(2, '0');
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '11px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${hours}:${minutes}`, x, topPadding + chartHeight + 18);
     }
 
-    // 2. Bollinger Bands Fill
+    // 3. Bollinger Bands Fill
     if (bbands) {
       ctx.fillStyle = 'rgba(168, 85, 247, 0.05)';
       ctx.beginPath();
@@ -369,7 +398,7 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       });
     }
 
-    // 3. Moving Averages
+    // 4. Moving Averages
     if (indicators.sma && smaValues.length > 0) {
       ctx.beginPath();
       ctx.strokeStyle = '#eab308';
@@ -412,10 +441,10 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       ctx.stroke();
     }
 
-    // 4. Draw Candlesticks / Area / Line
+    // 5. Draw Candlesticks / Area / Line (Green #10b981 / #00c874 and Red #ef4444 / #ff4766)
     if (chartType === 'line' || chartType === 'area') {
       ctx.beginPath();
-      ctx.strokeStyle = '#00e599';
+      ctx.strokeStyle = '#10b981';
       ctx.lineWidth = 2;
       candleSlice.forEach((c, idx) => {
         const x = getX(idx);
@@ -429,14 +458,14 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
         ctx.lineTo(getX(candleSlice.length - 1), topPadding + chartHeight);
         ctx.lineTo(getX(0), topPadding + chartHeight);
         ctx.closePath();
-        ctx.fillStyle = 'rgba(0, 229, 153, 0.08)';
+        ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
         ctx.fill();
       }
     } else {
       candleSlice.forEach((c, idx) => {
         const x = getX(idx);
         const isBullish = c.close >= c.open;
-        const color = isBullish ? '#00e599' : '#ff4766';
+        const color = isBullish ? '#10b981' : '#ef4444';
 
         const openY = getY(c.open);
         const closeY = getY(c.close);
@@ -445,7 +474,7 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
         // Wick
         ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 1.4;
         ctx.beginPath();
         ctx.moveTo(x, highY);
         ctx.lineTo(x, lowY);
@@ -453,28 +482,29 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
         // Body
         const bodyTop = Math.min(openY, closeY);
-        const bodyHeight = Math.max(1.8, Math.abs(closeY - openY));
+        const bodyHeight = Math.max(2, Math.abs(closeY - openY));
 
         ctx.fillStyle = color;
         ctx.fillRect(x - bodyWidth / 2, bodyTop, bodyWidth, bodyHeight);
       });
     }
 
-    // 5. Vertical Lines: Beginning of trade & End of trade (Fixed minute time so it NEVER flickers on trade!)
-    const beginningIdx = Math.floor(candleSlice.length * 0.42);
-    const beginningX = getX(beginningIdx);
-    const endX = getX(Math.floor(candleSlice.length * 0.72));
+    // 6. Vertical Lines: Beginning of trade (at live candle) & End of trade (to the right)
+    const liveCandleIdx = candleSlice.length - 1;
+    const liveCandleX = getX(liveCandleIdx);
+    const endX = liveCandleX + candleWidth * 3.2;
 
+    // Beginning of trade line at liveCandleX
     ctx.save();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#10b981';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
     ctx.beginPath();
-    ctx.moveTo(beginningX, topPadding);
-    ctx.lineTo(beginningX, topPadding + chartHeight);
+    ctx.moveTo(liveCandleX, topPadding);
+    ctx.lineTo(liveCandleX, topPadding + chartHeight);
     ctx.stroke();
 
-    const latestCandleTime = candleSlice[candleSlice.length - 1]?.time || Date.now();
+    const latestCandleTime = candleSlice[liveCandleIdx]?.time || Date.now();
     const fixedDate = new Date(latestCandleTime);
     const fixedTimeStr = `${fixedDate.getHours().toString().padStart(2, '0')}:${fixedDate
       .getMinutes()
@@ -483,32 +513,35 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
     ctx.fillStyle = '#10b981';
     ctx.beginPath();
-    ctx.arc(beginningX - 45, topPadding + 6, 3, 0, Math.PI * 2);
+    ctx.arc(liveCandleX - 75, topPadding + 6, 3.5, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.fillStyle = '#94a3b8';
+    ctx.fillStyle = '#cbd5e1';
     ctx.font = '10px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`${fixedTimeStr} Beginning of trade`, beginningX - 35, topPadding + 9);
+    ctx.fillText(fixedTimeStr, liveCandleX - 65, topPadding + 9);
+    ctx.fillStyle = '#64748b';
+    ctx.fillText('Beginning of trade', liveCandleX - 65, topPadding + 22);
     ctx.restore();
 
     // End of trade line
     ctx.save();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.2;
-    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#334155';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([]);
     ctx.beginPath();
     ctx.moveTo(endX, topPadding);
     ctx.lineTo(endX, topPadding + chartHeight);
     ctx.stroke();
 
-    ctx.fillStyle = '#94a3b8';
+    ctx.fillStyle = '#64748b';
     ctx.font = '10px "Plus Jakarta Sans", sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText('◀ End of trade', endX + 8, topPadding + 9);
+    ctx.fillText('◀', endX + 4, topPadding + 9);
+    ctx.fillText('End of trade', endX + 4, topPadding + 22);
     ctx.restore();
 
-    // 6. Lowest Price Tag
+    // 7. Lowest Price Tag
     if (minPriceIndex >= 0 && minPriceIndex < candleSlice.length) {
       const minX = getX(minPriceIndex);
       const lowestActual = candleSlice[minPriceIndex].low;
@@ -525,7 +558,7 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       ctx.fillText(formatPrice(lowestActual, activeAsset.decimalPlaces), minX, minY + 20);
     }
 
-    // 7. User-Drawn Lines (Horizontal, Custom Point-to-Point Trendline, Freehand Pen)
+    // 8. User-Drawn Lines (Horizontal, Custom Point-to-Point Trendline, Freehand Pen)
     const renderLineItem = (
       line: {
         type: 'horizontal' | 'trendline' | 'freehand';
@@ -553,13 +586,13 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
           ctx.fillStyle = line.color || '#eab308';
           ctx.beginPath();
-          ctx.roundRect(chartWidth + 3, lineY - 10, 68, 20, 4);
+          ctx.roundRect(chartWidth + 3, lineY - 10, 66, 20, 4);
           ctx.fill();
 
           ctx.fillStyle = '#0a0d14';
           ctx.font = 'bold 10px "JetBrains Mono", monospace';
           ctx.textAlign = 'center';
-          ctx.fillText(formatPrice(line.price1, activeAsset.decimalPlaces), chartWidth + 37, lineY + 4);
+          ctx.fillText(formatPrice(line.price1, activeAsset.decimalPlaces), chartWidth + 36, lineY + 4);
           ctx.restore();
         }
       } else if (line.type === 'trendline' && line.price2 !== undefined) {
@@ -577,7 +610,6 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
         ctx.lineTo(x2, y2);
         ctx.stroke();
 
-        // Anchor handles at both ends of user-drawn line
         ctx.fillStyle = line.color || '#eab308';
         ctx.beginPath();
         ctx.arc(x1, y1, 4.5, 0, Math.PI * 2);
@@ -610,12 +642,12 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       renderLineItem({ ...draftLine, color: drawingColor }, true);
     }
 
-    // 8. Active Trades Strike Lines on Chart
+    // 9. Active Trades Strike Lines on Chart
     activeTrades.forEach((trade) => {
       if (trade.assetId !== activeAsset.id) return;
       const tradeY = getY(trade.entryPrice);
       const isUp = trade.direction === 'UP';
-      const color = isUp ? '#00e599' : '#ff4766';
+      const color = isUp ? '#10b981' : '#ef4444';
       const remSec = Math.max(0, Math.ceil((trade.closeTime - Date.now()) / 1000));
 
       ctx.save();
@@ -632,27 +664,51 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       ctx.roundRect(8, tradeY - 10, 92, 20, 4);
       ctx.fill();
 
-      ctx.fillStyle = '#0b0e14';
+      ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 10px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.fillText(`${isUp ? '▲' : '▼'} $${trade.amount} (${remSec}s)`, 54, tradeY + 4);
       ctx.restore();
     });
 
-    // 9. Live Strike Price Line & Strictly 1-Minute Candle Countdown Timer
-    // Fixed: Placing a trade NEVER changes or overrides this 1-minute candle countdown timer!
+    // 10. Live Strike Price Line, White-Ringed Dot on Live Candle, & Strictly 1-Minute Candle Countdown Timer
     const currentPrice = activeAsset.currentPrice;
     const currentY = getY(currentPrice);
+    const liveCandle = candleSlice[liveCandleIdx];
+    const isLiveCandleGreen = liveCandle ? liveCandle.close >= liveCandle.open : true;
 
     ctx.save();
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 1.3;
-    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1.2;
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
     ctx.moveTo(0, currentY);
     ctx.lineTo(chartWidth, currentY);
     ctx.stroke();
     ctx.restore();
+
+    // Glowing White-Ringed Circle Dot right on the Live Candle at (liveCandleX, currentY) (Exact screenshot match!)
+    ctx.save();
+    ctx.fillStyle = isLiveCandleGreen ? '#10b981' : '#ef4444';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(liveCandleX, currentY, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // Update anchor coordinates if changed significantly so RESULT (P/L) box stays locked to the candle
+    setLiveCandleAnchor((prev) => {
+      if (
+        Math.abs(prev.x - liveCandleX) > 1.5 ||
+        Math.abs(prev.y - currentY) > 1.5 ||
+        prev.chartWidth !== chartWidth
+      ) {
+        return { x: liveCandleX, y: currentY, chartWidth, chartHeight };
+      }
+      return prev;
+    });
 
     // Strictly 1-minute (60s) candle countdown pill on the current price line
     const candleRemainingSec = 60 - (Math.floor(Date.now() / 1000) % 60);
@@ -660,41 +716,41 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
     const secs = candleRemainingSec % 60;
     const timeFormatted = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     const timerPillWidth = 46;
-    const timerPillHeight = 18;
-    const timerPillX = chartWidth - timerPillWidth - 10;
+    const timerPillHeight = 20;
+    const timerPillX = chartWidth - timerPillWidth - 14;
     const timerPillY = currentY - timerPillHeight / 2;
 
-    ctx.fillStyle = '#1c2430';
+    ctx.fillStyle = '#1e2636';
     ctx.beginPath();
-    ctx.roundRect(timerPillX, timerPillY, timerPillWidth, timerPillHeight, 4);
+    ctx.roundRect(timerPillX, timerPillY, timerPillWidth, timerPillHeight, 5);
     ctx.fill();
 
-    ctx.strokeStyle = '#2b3648';
+    ctx.strokeStyle = '#2e3a4e';
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    ctx.fillStyle = '#cbd5e1';
-    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#e2e8f0';
+    ctx.font = '11px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(timeFormatted, timerPillX + timerPillWidth / 2, timerPillY + 13);
+    ctx.fillText(timeFormatted, timerPillX + timerPillWidth / 2, timerPillY + 14);
 
-    // Cyan Price Badge on Right Axis
-    const tagWidth = 66;
-    const tagHeight = 22;
-    const tagX = chartWidth + 3;
+    // Blue Price Pill on Right Axis (Matches 0.93214 rounded blue pill in screenshot!)
+    const tagWidth = 68;
+    const tagHeight = 24;
+    const tagX = chartWidth + 2;
     const tagY = currentY - tagHeight / 2;
 
-    ctx.fillStyle = '#0284c7';
+    ctx.fillStyle = '#2596ff';
     ctx.beginPath();
-    ctx.roundRect(tagX, tagY, tagWidth, tagHeight, 4);
+    ctx.roundRect(tagX, tagY, tagWidth, tagHeight, 12);
     ctx.fill();
 
     ctx.fillStyle = '#ffffff';
     ctx.font = 'bold 11px "JetBrains Mono", monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(formatPrice(currentPrice, activeAsset.decimalPlaces), tagX + tagWidth / 2, tagY + 15);
+    ctx.fillText(formatPrice(currentPrice, activeAsset.decimalPlaces), tagX + tagWidth / 2, tagY + 16);
 
-    // 10. Sub-charts: RSI, MACD, Stochastic
+    // 11. Sub-charts: RSI, MACD, Stochastic
     let currentSubY = topPadding + chartHeight + 25;
 
     if (indicators.rsi && rsiValues.length > 0) {
@@ -807,7 +863,7 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       ctx.stroke();
     }
 
-    // 11. Crosshair on touch / mouse
+    // 12. Crosshair on touch / mouse
     if (
       mousePos &&
       mousePos.x >= 0 &&
@@ -855,7 +911,7 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
     panOffset
   ]);
 
-  // ResizeObserver for reliable layout updates
+  // ResizeObserver
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -958,7 +1014,6 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
           color: drawingColor
         });
       } else {
-        // If user tapped without dragging, create a clean visible segment around the tap point
         const timeSpan =
           Math.abs(draftLine.time2 - draftLine.time1) < 1000
             ? 60 * 1000 * 6
@@ -1003,7 +1058,6 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       const clickX = e.touches[0].clientX - rect.left;
       const clickY = e.touches[0].clientY - rect.top;
 
-      // Interactive Pen Tool Drawing on Touch
       if (activeDrawingTool !== 'none') {
         const coords = screenToChartCoords(clickX, clickY);
         if (!coords) return;
@@ -1114,6 +1168,82 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
   const penColors = ['#eab308', '#00e599', '#ff3355', '#38bdf8', '#c084fc', '#ffffff'];
 
+  // Compute RESULT (P/L) Box Position & Styling right next to the live trading candle!
+  const renderResultBubbleNextToCandle = () => {
+    if (!lastClosedTrade) return null;
+
+    const isWon = lastClosedTrade.status === 'WON';
+    const isTie = lastClosedTrade.status === 'TIE';
+    const isRedSell = lastClosedTrade.direction === 'DOWN';
+
+    // Total return payout on win (e.g. 1500 + 1155 = 2,655.00 $)
+    const totalReturn = isWon
+      ? Number((lastClosedTrade.amount + (lastClosedTrade.actualProfit || 0)).toFixed(2))
+      : lastClosedTrade.amount;
+
+    const formattedAmount = isWon
+      ? `+${totalReturn.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        })} $`
+      : isTie
+      ? `0.00 $`
+      : `-${lastClosedTrade.amount.toLocaleString('en-US', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        })} $`;
+
+    // Position the box immediately to the LEFT of the live candle's close dot (liveCandleAnchor.x, liveCandleAnchor.y)
+    const boxWidth = 166;
+    const boxHeight = 64;
+    const clampedLeft = Math.max(8, Math.min(liveCandleAnchor.chartWidth - boxWidth - 12, liveCandleAnchor.x - boxWidth - 10));
+    const clampedTop = Math.max(16, Math.min(liveCandleAnchor.chartHeight - boxHeight - 8, liveCandleAnchor.y - boxHeight / 2));
+
+    // Color matches trade direction: Green on Green (Buy), Red on Red (Sell)
+    const bgClass = isRedSell
+      ? 'bg-[#e11d48]/95 border-[#ff4d6b]/60 shadow-[0_6px_24px_rgba(225,29,72,0.5)]'
+      : 'bg-[#0ca65a]/95 border-[#22c55e]/60 shadow-[0_6px_24px_rgba(12,166,90,0.5)]';
+
+    const pointerColorClass = isRedSell ? 'bg-[#e11d48]/95' : 'bg-[#0ca65a]/95';
+
+    return (
+      <div
+        style={{
+          left: `${clampedLeft}px`,
+          top: `${clampedTop}px`,
+          width: `${boxWidth}px`
+        }}
+        className="absolute z-30 select-none pointer-events-auto transition-all duration-150"
+      >
+        <div className={`relative rounded-md px-3.5 py-2.5 text-white border backdrop-blur-xs ${bgClass}`}>
+          {/* Top Row: RESULT (P/L) and Close × button */}
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wide text-white/90">
+              RESULT (P/L)
+            </span>
+            <button
+              onClick={clearLastClosedTrade}
+              className="text-white/75 hover:text-white transition-colors -mr-1 -mt-1 p-0.5 cursor-pointer"
+              title="Close"
+            >
+              <X className="w-4 h-4 stroke-[2.5]" />
+            </button>
+          </div>
+
+          {/* Bottom Row: +2,655.00 $ */}
+          <div className="text-[18px] font-extrabold font-mono-num tracking-tight text-white mt-0.5 leading-snug">
+            {formattedAmount}
+          </div>
+
+          {/* Right-side triangle pointer pointing directly at the live trading candle dot */}
+          <div
+            className={`absolute -right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 rotate-45 ${pointerColorClass}`}
+          />
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div
       ref={containerRef}
@@ -1131,6 +1261,9 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
         onWheel={handleWheel}
         className="block w-full h-full cursor-crosshair touch-none"
       />
+
+      {/* RESULT (P/L) Speech Bubble anchored directly next to the live trading candle */}
+      {renderResultBubbleNextToCandle()}
 
       {/* When Chart Buttons are HIDDEN: tiny discrete toggle button in top-left to Show them again */}
       {!showChartButtons && (
@@ -1153,6 +1286,18 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
             title="Chart Options & Settings"
           >
             <MoreHorizontal className="w-5 h-5" />
+          </button>
+
+          {/* Briefcase active trades button with badge (Matches screenshot position under ...) */}
+          <button
+            onClick={onOpenActiveTrades}
+            className="relative w-10 h-10 rounded-xl bg-[#1b2332]/90 backdrop-blur-md border border-[#2b374c] text-slate-300 hover:text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer"
+            title="Active Orders"
+          >
+            <Briefcase className="w-5 h-5 text-slate-300" />
+            <span className="absolute -top-1.5 -right-1.5 bg-[#0284c7] text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
+              {activeTrades.length}
+            </span>
           </button>
 
           {/* Indicators Manager Tool */}
@@ -1190,18 +1335,6 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
             )}
           </button>
 
-          {/* Briefcase active trades button with badge */}
-          <button
-            onClick={onOpenActiveTrades}
-            className="relative w-10 h-10 rounded-xl bg-[#1b2332]/90 backdrop-blur-md border border-[#2b374c] text-slate-300 hover:text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer"
-            title="Active Orders"
-          >
-            <Briefcase className="w-5 h-5 text-slate-300" />
-            <span className="absolute -top-1.5 -right-1.5 bg-[#0284c7] text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
-              {activeTrades.length}
-            </span>
-          </button>
-
           {/* Hide Floating Buttons Toggle */}
           <button
             onClick={() => setShowChartButtons(false)}
@@ -1216,7 +1349,6 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       {/* Interactive Pen Tool Floating Toolbar (When Pen Tool is Active) */}
       {activeDrawingTool !== 'none' && (
         <div className="absolute top-3.5 left-15 right-3 z-20 flex flex-wrap items-center justify-between gap-2 bg-[#121926]/95 backdrop-blur-md border border-amber-400/50 rounded-xl px-2.5 py-1.5 shadow-2xl">
-          {/* Drawing Mode Selector */}
           <div className="flex items-center gap-1">
             <button
               onClick={() => setActiveDrawingTool('trendline')}
@@ -1250,7 +1382,6 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
             </button>
           </div>
 
-          {/* Color Dots */}
           <div className="flex items-center gap-1">
             {penColors.map((c) => (
               <button
@@ -1264,7 +1395,6 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
             ))}
           </div>
 
-          {/* Actions: Undo, Clear, Close */}
           <div className="flex items-center gap-1">
             {drawnLines.length > 0 && (
               <>

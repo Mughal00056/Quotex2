@@ -67,7 +67,7 @@ const QuotexPlatform: React.FC = () => {
             onOpenLeaderboard={() => setLeaderboardOpen(true)}
           />
 
-          {/* 2. Main Live Chart Area with DEMO watermark, vertical trade lines, countdown pill, floating buttons */}
+          {/* 2. Main Live Chart Area with DEMO watermark, vertical trade lines, countdown pill, floating buttons & candle-anchored RESULT (P/L) */}
           <div className="flex-1 relative overflow-hidden bg-[#0a0d14]">
             <ChartCanvas
               onOpenSettings={() => setChartSettingsOpen(true)}
@@ -77,8 +77,6 @@ const QuotexPlatform: React.FC = () => {
               }}
               onOpenActiveTrades={() => setActiveTradesOpen(true)}
             />
-            {/* Results P/F placed directly ON THE TRADING CHART area where trading is happening! */}
-            <TradeResultPopup />
           </div>
 
           {/* 3. Lower Quotex Console (EUR/CHF 85% ▾, PENDING TRADE, Timer, Investment, Payout, Buy & Sell) */}

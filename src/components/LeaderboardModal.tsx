@@ -34,7 +34,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onCl
 
   if (!isOpen) return null;
 
-  // Calculate user's live profit from tradeHistory if customLeaderboardProfit is not set
+  // Calculate user's live profit from tradeHistory so every trade win immediately updates profit & position
   const calculatedNetProfit = tradeHistory.reduce((sum, t) => sum + (t.actualProfit || 0), 0);
   const userProfit =
     customLeaderboardProfit !== null
@@ -79,15 +79,26 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onCl
   const rankedList = allEntries.slice(0, 15);
   const userIndexInTop = allEntries.findIndex((e) => e.isCurrentUser);
 
-  // Determine user's displayed position
+  // Dynamically calculate user's position so every trade won visibly improves Your position
+  const computeDynamicRank = (profit: number) => {
+    if (userIndexInTop !== -1) {
+      return userIndexInTop + 1;
+    }
+    if (profit <= -5.21) {
+      return 37019 + Math.floor(Math.abs(profit + 5.21) * 1.5);
+    }
+    if (profit <= 0) {
+      return 37019;
+    }
+    // Smooth exponential rank climb from 37019 down to 16 as profit grows from $1 to $6,579
+    const ratio = Math.min(1, profit / 6580);
+    return Math.max(16, Math.round(37019 * Math.pow(1 - ratio, 2.6)));
+  };
+
   const displayedPosition =
     customLeaderboardRank !== null
       ? customLeaderboardRank
-      : userIndexInTop !== -1
-      ? userIndexInTop + 1
-      : userProfit > 0
-      ? Math.max(16, Math.floor(15000 / (1 + userProfit / 100)))
-      : 37019;
+      : computeDynamicRank(userProfit);
 
   // Progress bar percentage for user's top card (matching screenshot green bar)
   const progressPercent =

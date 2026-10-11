@@ -520,18 +520,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         const lastCandle = curCandles[curCandles.length - 1];
 
         const volatility = activeAsset.volatility;
-        let delta = (Math.random() - 0.5) * volatility * 0.055;
+        let delta = (Math.random() - 0.5) * volatility * 0.05;
 
-        // Apply gentle directional drift if a trade is active
-        if (activeBiasRef.current !== 0) {
-          delta += activeBiasRef.current * volatility * 0.018;
-        }
-
-        // If a trade is within 1.5s of expiring, gently guide price to match the target outcome
+        // Check active trades on this asset to synchronize candle color & price direction
         const currentTradesOnAsset = activeTradesRef.current.filter((t) => t.assetId === activeAsset.id);
         if (currentTradesOnAsset.length > 0) {
           const latest = currentTradesOnAsset[0];
-          const timeLeftMs = latest.closeTime - now;
+          const timeLeftMs = Math.max(100, latest.closeTime - now);
           let targetOutcome: 'WIN' | 'LOSS' = 'WIN';
           if (marketModeRef.current === 'force_loss') {
             targetOutcome = 'LOSS';
@@ -539,18 +534,33 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
             targetOutcome = tradeOutcomeTargetRef.current[latest.id] || 'WIN';
           }
 
-          if (timeLeftMs > 0 && timeLeftMs < 2000) {
-            const wantHigher =
-              (latest.direction === 'UP' && targetOutcome === 'WIN') ||
-              (latest.direction === 'DOWN' && targetOutcome === 'LOSS');
-            const currentP = lastCandle.close + delta;
-            const minStep = Math.pow(10, -activeAsset.decimalPlaces) * 2;
-            if (wantHigher && currentP <= latest.entryPrice) {
-              delta += (latest.entryPrice - currentP) * 0.45 + volatility * 0.02 + minStep;
-            } else if (!wantHigher && currentP >= latest.entryPrice) {
-              delta -= (currentP - latest.entryPrice) * 0.45 + volatility * 0.02 + minStep;
+          // Determine if price should move UP (Green candle) or DOWN (Red candle)
+          const wantGreenUp =
+            (latest.direction === 'UP' && targetOutcome === 'WIN') ||
+            (latest.direction === 'DOWN' && targetOutcome === 'LOSS');
+
+          const minStep = Math.pow(10, -activeAsset.decimalPlaces) * 3;
+          const ticksLeft = Math.max(2, Math.min(25, Math.floor(timeLeftMs / tickInterval)));
+
+          if (wantGreenUp) {
+            // Target above both entryPrice and current candle open so the candle is visibly GREEN
+            const targetPrice = Math.max(latest.entryPrice, lastCandle.open) + volatility * 0.45 + minStep;
+            if (lastCandle.close < targetPrice) {
+              delta = (targetPrice - lastCandle.close) / ticksLeft + Math.random() * volatility * 0.03;
+            } else {
+              delta = Math.abs(delta) * 0.6 + volatility * 0.012;
+            }
+          } else {
+            // Target below both entryPrice and current candle open so the candle is visibly RED
+            const targetPrice = Math.min(latest.entryPrice, lastCandle.open) - volatility * 0.45 - minStep;
+            if (lastCandle.close > targetPrice) {
+              delta = (targetPrice - lastCandle.close) / ticksLeft - Math.random() * volatility * 0.03;
+            } else {
+              delta = -Math.abs(delta) * 0.6 - volatility * 0.012;
             }
           }
+        } else if (activeBiasRef.current !== 0) {
+          delta += activeBiasRef.current * volatility * 0.018;
         }
 
         const newPrice = Number((lastCandle.close + delta).toFixed(activeAsset.decimalPlaces));
@@ -641,6 +651,26 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
             } else if (!shouldBeAbove && exitPrice >= trade.entryPrice) {
               exitPrice = Number((trade.entryPrice - minTick).toFixed(activeAsset.decimalPlaces));
             }
+            currentPriceRef.current = exitPrice;
+            setAssets((prev) =>
+              prev.map((a) => (a.id === trade.assetId ? { ...a, currentPrice: exitPrice } : a))
+            );
+            setAssetCandlesMap((prevMap) => {
+              const list = prevMap[trade.assetId];
+              if (!list || list.length === 0) return prevMap;
+              const last = list[list.length - 1];
+              const adjOpen = shouldBeAbove
+                ? Math.min(last.open, Number((exitPrice - minTick).toFixed(activeAsset.decimalPlaces)))
+                : Math.max(last.open, Number((exitPrice + minTick).toFixed(activeAsset.decimalPlaces)));
+              const updatedLast: Candle = {
+                ...last,
+                open: adjOpen,
+                high: Math.max(last.high, exitPrice, adjOpen),
+                low: Math.min(last.low, exitPrice, adjOpen),
+                close: exitPrice
+              };
+              return { ...prevMap, [trade.assetId]: [...list.slice(0, -1), updatedLast] };
+            });
           }
 
           let status: TradeStatus = 'LOST';
@@ -686,6 +716,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
             } else {
               setRealBalance((b) => Number((b + returnAmount).toFixed(2)));
             }
+            // Dynamically update Leaderboard Profit & allow Position to recalculate automatically
+            setCustomLeaderboardProfitState((prev: number | null) => {
+              if (prev === null) return null;
+              const base = prev < 0 ? 0 : prev;
+              const nextVal = Number((base + actualProfit).toFixed(2));
+              localStorage.setItem(STORAGE_KEYS.CUSTOM_LB_PROFIT, nextVal.toString());
+              return nextVal;
+            });
+            setCustomLeaderboardRank(null);
             sounds.playWin();
           } else if (status === 'TIE') {
             if (trade.accountType === 'DEMO') {
@@ -694,6 +733,13 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
               setRealBalance((b) => Number((b + trade.amount).toFixed(2)));
             }
           } else {
+            setCustomLeaderboardProfitState((prev: number | null) => {
+              if (prev === null) return null;
+              const nextVal = Number((prev - trade.amount).toFixed(2));
+              localStorage.setItem(STORAGE_KEYS.CUSTOM_LB_PROFIT, nextVal.toString());
+              return nextVal;
+            });
+            setCustomLeaderboardRank(null);
             sounds.playLoss();
           }
 
@@ -754,6 +800,36 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
       };
 
       sounds.playTradePlaced();
+
+      // Immediately nudge the live candle so Buy shows a Green candle and Sell shows a Red candle
+      const wantGreenCandle =
+        (direction === 'UP' && tradeOutcomeTargetRef.current[tradeId] === 'WIN') ||
+        (direction === 'DOWN' && tradeOutcomeTargetRef.current[tradeId] === 'LOSS');
+      const minStep = Math.pow(10, -activeAsset.decimalPlaces) * 3;
+      const step = activeAsset.volatility * 0.22 * (wantGreenCandle ? 1 : -1);
+      const nudgedPrice = Number((currentPrice + step).toFixed(activeAsset.decimalPlaces));
+      currentPriceRef.current = nudgedPrice;
+
+      setAssets((prev) =>
+        prev.map((a) => (a.id === activeAsset.id ? { ...a, currentPrice: nudgedPrice } : a))
+      );
+
+      setAssetCandlesMap((prevMap) => {
+        const list = prevMap[activeAsset.id];
+        if (!list || list.length === 0) return prevMap;
+        const last = list[list.length - 1];
+        const adjOpen = wantGreenCandle
+          ? Math.min(last.open, Number((nudgedPrice - minStep).toFixed(activeAsset.decimalPlaces)))
+          : Math.max(last.open, Number((nudgedPrice + minStep).toFixed(activeAsset.decimalPlaces)));
+        const updatedLast: Candle = {
+          ...last,
+          open: adjOpen,
+          high: Math.max(last.high, nudgedPrice, adjOpen),
+          low: Math.min(last.low, nudgedPrice, adjOpen),
+          close: nudgedPrice
+        };
+        return { ...prevMap, [activeAsset.id]: [...list.slice(0, -1), updatedLast] };
+      });
 
       // Only trigger order toast if user explicitly enabled it (OFF by default as requested!)
       if (showOrderToastEnabled) {
