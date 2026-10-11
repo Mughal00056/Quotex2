@@ -85,6 +85,54 @@ export interface WithdrawalTransaction {
 
 export type ChartType = 'candlestick' | 'line' | 'area' | 'heikinAshi';
 
+export type CandleColorScheme = 'classic' | 'blue_orange' | 'neon' | 'gold_purple' | 'hollow_pro';
+
+export interface CandleColorPalette {
+  id: CandleColorScheme;
+  label: string;
+  subtitle: string;
+  bullish: string;
+  bearish: string;
+}
+
+export const CANDLE_COLOR_SCHEMES: Record<CandleColorScheme, CandleColorPalette> = {
+  classic: {
+    id: 'classic',
+    label: 'Classic (Green / Red)',
+    subtitle: 'Standard Quotex Emerald & Crimson',
+    bullish: '#10b981',
+    bearish: '#ef4444'
+  },
+  blue_orange: {
+    id: 'blue_orange',
+    label: 'Blue / Orange',
+    subtitle: 'High-contrast Electric Blue & Vivid Orange',
+    bullish: '#3b82f6',
+    bearish: '#f97316'
+  },
+  neon: {
+    id: 'neon',
+    label: 'Neon (Cyan / Magenta)',
+    subtitle: 'Cyberpunk Neon Mint & Hot Pink',
+    bullish: '#00f5d4',
+    bearish: '#ff007f'
+  },
+  gold_purple: {
+    id: 'gold_purple',
+    label: 'VIP (Gold / Purple)',
+    subtitle: 'Luxury Gold Bullish & Royal Violet Bearish',
+    bullish: '#facc15',
+    bearish: '#a855f7'
+  },
+  hollow_pro: {
+    id: 'hollow_pro',
+    label: 'Vibrant (Lime / Coral)',
+    subtitle: 'Ultra-bright Lime & Coral Red',
+    bullish: '#00e599',
+    bearish: '#ff3355'
+  }
+};
+
 export interface IndicatorSettings {
   sma: boolean;
   smaPeriod: number;

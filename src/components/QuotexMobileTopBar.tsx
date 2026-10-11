@@ -15,9 +15,12 @@ import {
   Trash2,
   PenTool,
   Trophy,
-  Send
+  Send,
+  Palette
 } from 'lucide-react';
 import { formatCurrency } from '../utils/chartMath';
+import { CANDLE_COLOR_SCHEMES, CandleColorScheme } from '../types/trading';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface QuotexMobileTopBarProps {
   onOpenDeposit: () => void;
@@ -59,7 +62,9 @@ export const QuotexMobileTopBar: React.FC<QuotexMobileTopBarProps> = ({
     customLeaderboardProfit,
     setCustomLeaderboardProfit,
     customLeaderboardRank,
-    setCustomLeaderboardRank
+    setCustomLeaderboardRank,
+    candleColorScheme,
+    setCandleColorScheme
   } = useTrading();
 
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
@@ -262,8 +267,10 @@ export const QuotexMobileTopBar: React.FC<QuotexMobileTopBarProps> = ({
           </div>
         </div>
 
-        {/* Right side: Bell icon with badge + Deposit button */}
-        <div className="flex items-center gap-2">
+        {/* Right side: PWA Install + Bell icon with badge + Deposit button */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          <PWAInstallButton compact />
+
           <button
             onClick={onOpenNotifications}
             className="relative w-8 h-8 rounded-lg bg-[#141b27] border border-[#232f44] flex items-center justify-center text-slate-300 hover:text-white transition-colors cursor-pointer"
@@ -521,6 +528,48 @@ export const QuotexMobileTopBar: React.FC<QuotexMobileTopBarProps> = ({
                   </button>
                 )}
               </div>
+
+              {/* SECTION 3.5: Candle Color Scheme Quick Selector */}
+              <div className="bg-[#141c2b] border border-[#223049] rounded-xl p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white text-xs flex items-center gap-1.5">
+                    <Palette className="w-4 h-4 text-cyan-400" />
+                    <span>Candle Color Scheme</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-1.5">
+                  {(Object.keys(CANDLE_COLOR_SCHEMES) as CandleColorScheme[]).map((schemeKey) => {
+                    const palette = CANDLE_COLOR_SCHEMES[schemeKey];
+                    const active = candleColorScheme === schemeKey;
+                    return (
+                      <button
+                        key={schemeKey}
+                        onClick={() => setCandleColorScheme(schemeKey)}
+                        className={`px-2.5 py-2 rounded-lg border flex items-center justify-between text-left transition-colors cursor-pointer ${
+                          active
+                            ? 'bg-[#1a263b] border-cyan-400 text-white'
+                            : 'bg-[#0d121c] border-[#1f2c40] text-slate-300 hover:bg-[#151e2e]'
+                        }`}
+                      >
+                        <span className="font-bold text-[11px]">{palette.label}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span
+                            className="w-3 h-3 rounded-xs inline-block"
+                            style={{ backgroundColor: palette.bullish }}
+                          />
+                          <span
+                            className="w-3 h-3 rounded-xs inline-block"
+                            style={{ backgroundColor: palette.bearish }}
+                          />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* SECTION 3.8: Offline Mode & PWA App Install */}
+              <PWAInstallButton />
 
               {/* SECTION 4: Live Account Money & $100,000+ Purple Crown VIP */}
               <div className="bg-[#141c2b] border border-[#223049] rounded-xl p-3.5 space-y-2.5">

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ChevronLeft, Edit3, Check } from 'lucide-react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { ChevronLeft, Edit3, Check, RefreshCw } from 'lucide-react';
 import { useTrading } from '../context/TradingContext';
 
 interface LeaderboardModalProps {
@@ -16,6 +16,52 @@ interface LeaderboardEntry {
   isCurrentUser?: boolean;
 }
 
+// Large pool of 48 distinct international traders so every time Leaderboard opens, traders change!
+const TRADER_POOL: Omit<LeaderboardEntry, 'profit' | 'capAt30k'>[] = [
+  { name: 'Zain Fx', flag: '🇵🇰', avatarType: 'blue' },
+  { name: '#Aryan Vip', flag: '🇮🇳', avatarType: 'blue' },
+  { name: '@QUOTEX_KING...', flag: '🇮🇳', avatarType: 'dark' },
+  { name: 'HAMZA PRO', flag: '🇵🇰', avatarType: 'blue' },
+  { name: '#VTO SNIPER', flag: '🇮🇳', avatarType: 'blue' },
+  { name: 'Salman Trad...', flag: '🇵🇰', avatarType: 'blue' },
+  { name: '$100k Club', flag: '🇮🇳', avatarType: 'blue' },
+  { name: 'Vikram_FX', flag: '🇮🇳', avatarType: 'photo1' },
+  { name: 'اسد التداول...', flag: '🇪🇬', avatarType: 'photo2' },
+  { name: 'Lucas_OTC', flag: '🇧🇷', avatarType: 'blue' },
+  { name: 'Bilal_Trader', flag: '🇵🇰', avatarType: 'blue' },
+  { name: 'Sultan_DXB', flag: '🇦🇪', avatarType: 'dark' },
+  { name: 'Karan_Scalp', flag: '🇮🇳', avatarType: 'blue' },
+  { name: 'Faisal_VIP', flag: '🇸🇦', avatarType: 'blue' },
+  { name: 'Rizwan_PK', flag: '🇵🇰', avatarType: 'blue' },
+  { name: 'Usman_Gold', flag: '🇵🇰', avatarType: 'photo1' },
+  { name: 'Rohit_Binary', flag: '🇮🇳', avatarType: 'blue' },
+  { name: 'Tariq_AlMaktoum', flag: '🇦🇪', avatarType: 'photo2' },
+  { name: 'Daniyal_FX', flag: '🇵🇰', avatarType: 'blue' },
+  { name: 'Thiago_SilvaFX', flag: '🇧🇷', avatarType: 'dark' },
+  { name: 'Mehmet_TR', flag: '🇹🇷', avatarType: 'blue' },
+  { name: 'Aditya_Pro99', flag: '🇮🇳', avatarType: 'photo1' },
+  { name: 'Zeeshan_OTC', flag: '🇵🇰', avatarType: 'blue' },
+  { name: 'Omar_CairoFX', flag: '🇪🇬', avatarType: 'blue' },
+  { name: 'Rehan_Sniper', flag: '🇵🇰', avatarType: 'dark' },
+  { name: 'Budi_Jakarta', flag: '🇮🇩', avatarType: 'blue' },
+  { name: 'Kabir_Bull', flag: '🇮🇳', avatarType: 'photo2' },
+  { name: 'Shahzaib_VIP', flag: '🇵🇰', avatarType: 'blue' },
+  { name: 'Mateo_Latam', flag: '🇦🇷', avatarType: 'blue' },
+  { name: 'Yusuf_Istanbul', flag: '🇹🇷', avatarType: 'photo1' },
+  { name: 'Nabeel_FX', flag: '🇵🇰', avatarType: 'blue' },
+  { name: 'Harsh_Option', flag: '🇮🇳', avatarType: 'dark' },
+  { name: 'Khalid_Riyadh', flag: '🇸🇦', avatarType: 'blue' },
+  { name: 'Kamran_Lahore', flag: '🇵🇰', avatarType: 'photo2' },
+  { name: 'Gabriel_BR', flag: '🇧🇷', avatarType: 'blue' },
+  { name: 'Ankit_Million', flag: '🇮🇳', avatarType: 'blue' },
+  { name: 'Waqas_King', flag: '🇵🇰', avatarType: 'dark' },
+  { name: 'Farhan_Doha', flag: '🇶🇦', avatarType: 'blue' },
+  { name: 'Rizky_IndoFX', flag: '🇮🇩', avatarType: 'photo1' },
+  { name: 'Sajjad_Pro', flag: '🇵🇰', avatarType: 'blue' },
+  { name: 'Pranav_Trades', flag: '🇮🇳', avatarType: 'blue' },
+  { name: 'Hassan_Mughal', flag: '🇵🇰', avatarType: 'photo2' }
+];
+
 export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onClose }) => {
   const {
     tradeHistory,
@@ -31,6 +77,64 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onCl
 
   const [showEditPanel, setShowEditPanel] = useState(false);
   const [showRatingInfo, setShowRatingInfo] = useState(false);
+  const [rotationSeed, setRotationSeed] = useState<number>(() => Date.now());
+
+  // Every time the Leaderboard opens or tradeHistory changes, rotate traders ("leaderboard ma har bar banda change ho")
+  useEffect(() => {
+    if (isOpen) {
+      setRotationSeed(Date.now() + Math.floor(Math.random() * 100000));
+    }
+  }, [isOpen, tradeHistory.length]);
+
+  const handleManualRefreshTraders = useCallback(() => {
+    setRotationSeed(Date.now() + Math.floor(Math.random() * 100000));
+  }, []);
+
+  // Generate a fresh shuffled set of 15 traders whenever rotationSeed updates
+  const dynamicTraders = useMemo<LeaderboardEntry[]>(() => {
+    const copy = [...TRADER_POOL];
+    let s = rotationSeed;
+    const nextRand = () => {
+      s = (s * 1664525 + 1013904223) % 4294967296;
+      return s / 4294967296;
+    };
+
+    // Fisher-Yates shuffle with rotationSeed
+    for (let i = copy.length - 1; i > 0; i--) {
+      const j = Math.floor(nextRand() * (i + 1));
+      const temp = copy[i];
+      copy[i] = copy[j];
+      copy[j] = temp;
+    }
+
+    const selected = copy.slice(0, 15);
+    const profitTiers = [
+      34800 + nextRand() * 4500,
+      30500 + nextRand() * 3200,
+      21100 + nextRand() * 6800,
+      16400 + nextRand() * 3900,
+      13800 + nextRand() * 2200,
+      12500 + nextRand() * 1200,
+      11600 + nextRand() * 850,
+      10700 + nextRand() * 800,
+      9850 + nextRand() * 750,
+      9100 + nextRand() * 650,
+      8350 + nextRand() * 650,
+      7650 + nextRand() * 600,
+      6950 + nextRand() * 550,
+      6350 + nextRand() * 500,
+      5750 + nextRand() * 480
+    ];
+
+    return selected.map((t, idx) => {
+      const rawProfit = Number(profitTiers[idx].toFixed(2));
+      return {
+        ...t,
+        profit: rawProfit,
+        capAt30k: rawProfit >= 30000
+      };
+    });
+  }, [rotationSeed]);
 
   if (!isOpen) return null;
 
@@ -43,28 +147,9 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onCl
       ? Number(calculatedNetProfit.toFixed(2))
       : -5.21;
 
-  // Distinct realistic traders list matching the Quotex Leader Board of the Day layout
-  const baseTraders: LeaderboardEntry[] = [
-    { name: 'Zain Fx', flag: '🇵🇰', profit: 34500.0, capAt30k: true, avatarType: 'blue' },
-    { name: '#Aryan Vip', flag: '🇮🇳', profit: 31200.0, capAt30k: true, avatarType: 'blue' },
-    { name: '@QUOTEX_KING...', flag: '🇮🇳', profit: 21277.96, avatarType: 'dark' },
-    { name: 'HAMZA PRO', flag: '🇵🇰', profit: 15755.5, avatarType: 'blue' },
-    { name: '#VTO SNIPER', flag: '🇮🇳', profit: 12834.0, avatarType: 'blue' },
-    { name: 'Salman Trad...', flag: '🇵🇰', profit: 12621.7, avatarType: 'blue' },
-    { name: '$100k Club', flag: '🇮🇳', profit: 12618.53, avatarType: 'blue' },
-    { name: 'Vikram_FX', flag: '🇮🇳', profit: 11180.0, avatarType: 'photo1' },
-    { name: 'اسد التداول...', flag: '🇪🇬', profit: 10600.0, avatarType: 'photo2' },
-    { name: 'Lucas_OTC', flag: '🇧🇷', profit: 9840.25, avatarType: 'blue' },
-    { name: 'Bilal_Trader', flag: '🇵🇰', profit: 9120.8, avatarType: 'blue' },
-    { name: 'Sultan_DXB', flag: '🇦🇪', profit: 8450.0, avatarType: 'dark' },
-    { name: 'Karan_Scalp', flag: '🇮🇳', profit: 7930.4, avatarType: 'blue' },
-    { name: 'Faisal_VIP', flag: '🇸🇦', profit: 7215.9, avatarType: 'blue' },
-    { name: 'Rizwan_PK', flag: '🇵🇰', profit: 6580.0, avatarType: 'blue' }
-  ];
-
   // Combine user into the leaderboard if their profit qualifies for the top 15
-  const allEntries: LeaderboardEntry[] = [...baseTraders];
-  if (userProfit >= baseTraders[baseTraders.length - 1].profit) {
+  const allEntries: LeaderboardEntry[] = [...dynamicTraders];
+  if (userProfit >= dynamicTraders[dynamicTraders.length - 1].profit) {
     allEntries.push({
       name: traderName || 'YA TRADER',
       flag: traderFlag || '🇵🇰',
@@ -90,8 +175,8 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onCl
     if (profit <= 0) {
       return 37019;
     }
-    // Smooth exponential rank climb from 37019 down to 16 as profit grows from $1 to $6,579
-    const ratio = Math.min(1, profit / 6580);
+    const minTopProfit = dynamicTraders[dynamicTraders.length - 1]?.profit || 5800;
+    const ratio = Math.min(1, profit / minTopProfit);
     return Math.max(16, Math.round(37019 * Math.pow(1 - ratio, 2.6)));
   };
 
@@ -152,14 +237,23 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onCl
             </div>
           </div>
 
-          {/* Quick Edit Button to customize Name / Profit / Position directly */}
-          <button
-            onClick={() => setShowEditPanel(!showEditPanel)}
-            className="p-1.5 rounded-lg bg-[#1a2030] hover:bg-[#232b40] text-slate-400 hover:text-white transition-colors cursor-pointer"
-            title="Customize Trader Name & Position"
-          >
-            {showEditPanel ? <Check className="w-4 h-4 text-emerald-400" /> : <Edit3 className="w-4 h-4" />}
-          </button>
+          {/* Right Action Buttons: Rotate Traders + Customize User Card */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleManualRefreshTraders}
+              className="p-1.5 rounded-lg bg-[#1a2030] hover:bg-[#232b40] text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer"
+              title="Refresh Traders List"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setShowEditPanel(!showEditPanel)}
+              className="p-1.5 rounded-lg bg-[#1a2030] hover:bg-[#232b40] text-slate-400 hover:text-white transition-colors cursor-pointer"
+              title="Customize Trader Name & Position"
+            >
+              {showEditPanel ? <Check className="w-4 h-4 text-emerald-400" /> : <Edit3 className="w-4 h-4" />}
+            </button>
+          </div>
         </div>
 
         {/* Optional Quick Customizer Drawer */}
@@ -287,7 +381,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onCl
             </div>
           )}
 
-          {/* 4. Ranked Traders List (1 to 15) */}
+          {/* 4. Ranked Traders List (1 to 15) — Dynamic rotation on every open */}
           <div className="mt-3 divide-y divide-[#1a2030]">
             {rankedList.map((trader, index) => {
               const rank = index + 1;
@@ -335,11 +429,11 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({ isOpen, onCl
                         </div>
                       ) : trader.avatarType === 'photo1' ? (
                         <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-emerald-500 to-teal-300 border border-[#121622] flex items-center justify-center text-[9px] font-bold text-slate-950">
-                          V
+                          {trader.name.replace(/[^A-Za-z]/g, '')[0]?.toUpperCase() || 'T'}
                         </div>
                       ) : trader.avatarType === 'photo2' ? (
                         <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-amber-700 to-stone-500 border border-[#121622] flex items-center justify-center text-[9px] font-bold text-white">
-                          A
+                          {trader.name.replace(/[^A-Za-z]/g, '')[0]?.toUpperCase() || 'A'}
                         </div>
                       ) : (
                         <div className="w-5 h-5 rounded-full bg-[#2b99ff] border border-[#121622] flex items-center justify-center">

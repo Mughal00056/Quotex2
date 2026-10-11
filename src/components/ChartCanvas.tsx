@@ -10,7 +10,7 @@ import {
   toHeikinAshi,
   formatPrice
 } from '../utils/chartMath';
-import { Candle } from '../types/trading';
+import { Candle, CANDLE_COLOR_SCHEMES } from '../types/trading';
 import {
   MoreHorizontal,
   Briefcase,
@@ -46,8 +46,10 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
     activeAsset,
     candles,
     chartType,
+    candleColorScheme,
     indicators,
     activeTrades,
+    tradeHistory,
     timeframe,
     accountType,
     isAssetLoading,
@@ -441,10 +443,14 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
       ctx.stroke();
     }
 
-    // 5. Draw Candlesticks / Area / Line (Green #10b981 / #00c874 and Red #ef4444 / #ff4766)
+    // 5. Draw Candlesticks / Area / Line using selected CandleColorScheme
+    const activePalette = CANDLE_COLOR_SCHEMES[candleColorScheme] || CANDLE_COLOR_SCHEMES.classic;
+    const bullColor = activePalette.bullish;
+    const bearColor = activePalette.bearish;
+
     if (chartType === 'line' || chartType === 'area') {
       ctx.beginPath();
-      ctx.strokeStyle = '#10b981';
+      ctx.strokeStyle = bullColor;
       ctx.lineWidth = 2;
       candleSlice.forEach((c, idx) => {
         const x = getX(idx);
@@ -458,14 +464,14 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
         ctx.lineTo(getX(candleSlice.length - 1), topPadding + chartHeight);
         ctx.lineTo(getX(0), topPadding + chartHeight);
         ctx.closePath();
-        ctx.fillStyle = 'rgba(16, 185, 129, 0.08)';
+        ctx.fillStyle = `${bullColor}18`;
         ctx.fill();
       }
     } else {
       candleSlice.forEach((c, idx) => {
         const x = getX(idx);
         const isBullish = c.close >= c.open;
-        const color = isBullish ? '#10b981' : '#ef4444';
+        const color = isBullish ? bullColor : bearColor;
 
         const openY = getY(c.open);
         const closeY = getY(c.close);
@@ -689,7 +695,7 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
 
     // Glowing White-Ringed Circle Dot right on the Live Candle at (liveCandleX, currentY) (Exact screenshot match!)
     ctx.save();
-    ctx.fillStyle = isLiveCandleGreen ? '#10b981' : '#ef4444';
+    ctx.fillStyle = isLiveCandleGreen ? bullColor : bearColor;
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -893,6 +899,7 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
     displayCandles,
     activeAsset,
     chartType,
+    candleColorScheme,
     indicators,
     activeTrades,
     mousePos,
@@ -1288,15 +1295,15 @@ export const ChartCanvas: React.FC<ChartCanvasProps> = ({
             <MoreHorizontal className="w-5 h-5" />
           </button>
 
-          {/* Briefcase active trades button with badge (Matches screenshot position under ...) */}
+          {/* Briefcase (Bag) trades button with badge — opens bottom sheet */}
           <button
             onClick={onOpenActiveTrades}
             className="relative w-10 h-10 rounded-xl bg-[#1b2332]/90 backdrop-blur-md border border-[#2b374c] text-slate-300 hover:text-white flex items-center justify-center shadow-lg transition-transform active:scale-95 cursor-pointer"
-            title="Active Orders"
+            title="Trades (1-Day History & Active Orders)"
           >
             <Briefcase className="w-5 h-5 text-slate-300" />
-            <span className="absolute -top-1.5 -right-1.5 bg-[#0284c7] text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center shadow-sm">
-              {activeTrades.length}
+            <span className="absolute -top-1.5 -right-1.5 bg-[#0284c7] text-white text-[10px] font-bold rounded-full min-w-4 h-4 px-1 flex items-center justify-center shadow-sm">
+              {activeTrades.length > 0 ? activeTrades.length : tradeHistory.length}
             </span>
           </button>
 

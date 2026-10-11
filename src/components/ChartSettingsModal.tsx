@@ -9,9 +9,10 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
-  Sliders
+  Sliders,
+  Palette
 } from 'lucide-react';
-import { ChartType } from '../types/trading';
+import { ChartType, CANDLE_COLOR_SCHEMES, CandleColorScheme } from '../types/trading';
 
 interface ChartSettingsModalProps {
   isOpen: boolean;
@@ -23,10 +24,11 @@ export const ChartSettingsModal: React.FC<ChartSettingsModalProps> = ({
   onClose
 }) => {
   const {
-    timeframe,
     setTimeframe,
     chartType,
     setChartType,
+    candleColorScheme,
+    setCandleColorScheme,
     indicators,
     setIndicators,
     soundEnabled,
@@ -92,7 +94,7 @@ export const ChartSettingsModal: React.FC<ChartSettingsModalProps> = ({
                 <button
                   key={ct.type}
                   onClick={() => setChartType(ct.type)}
-                  className={`p-2.5 rounded-xl border flex items-center gap-2 transition-all ${
+                  className={`p-2.5 rounded-xl border flex items-center gap-2 transition-all cursor-pointer ${
                     chartType === ct.type
                       ? 'bg-[#1b263b] border-cyan-500 text-cyan-300'
                       : 'bg-[#151c28] border-[#222e40] text-slate-300 hover:bg-[#1b2434]'
@@ -102,6 +104,68 @@ export const ChartSettingsModal: React.FC<ChartSettingsModalProps> = ({
                   <span className="font-medium">{ct.label}</span>
                 </button>
               ))}
+            </div>
+          </div>
+
+          {/* Candle Color Scheme Selector (Bullish & Bearish Candles) */}
+          <div>
+            <div className="font-semibold text-slate-300 mb-2 flex items-center gap-1.5">
+              <Palette className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Candle Color Scheme (Bullish / Bearish):</span>
+            </div>
+            <div className="space-y-1.5">
+              {(Object.keys(CANDLE_COLOR_SCHEMES) as CandleColorScheme[]).map((schemeKey) => {
+                const palette = CANDLE_COLOR_SCHEMES[schemeKey];
+                const isSelected = candleColorScheme === schemeKey;
+                return (
+                  <button
+                    key={schemeKey}
+                    onClick={() => setCandleColorScheme(schemeKey)}
+                    className={`w-full p-2.5 rounded-xl border flex items-center justify-between transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-[#1b263b] border-cyan-500 text-white shadow-sm'
+                        : 'bg-[#151c28] border-[#222e40] text-slate-300 hover:bg-[#1b2434]'
+                    }`}
+                  >
+                    <div className="text-left">
+                      <div className="font-bold text-xs flex items-center gap-1.5">
+                        <span>{palette.label}</span>
+                        {isSelected && (
+                          <span className="text-[9px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.5 rounded font-black">
+                            ACTIVE
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-400 mt-0.5">{palette.subtitle}</div>
+                    </div>
+
+                    {/* Visual Bullish & Bearish Mini Candlesticks Preview */}
+                    <div className="flex items-center gap-2 bg-[#0b0f17] px-2.5 py-1.5 rounded-lg border border-[#1f2a3c] shrink-0">
+                      <div className="flex items-center gap-1" title="Bullish Candle">
+                        <div className="relative flex flex-col items-center">
+                          <div className="w-[1.5px] h-1.5" style={{ backgroundColor: palette.bullish }} />
+                          <div className="w-2.5 h-3.5 rounded-[1px]" style={{ backgroundColor: palette.bullish }} />
+                          <div className="w-[1.5px] h-1.5" style={{ backgroundColor: palette.bullish }} />
+                        </div>
+                        <span className="text-[9px] font-mono font-bold" style={{ color: palette.bullish }}>
+                          UP
+                        </span>
+                      </div>
+                      <div className="w-[1px] h-4 bg-[#1f2a3c]" />
+                      <div className="flex items-center gap-1" title="Bearish Candle">
+                        <div className="relative flex flex-col items-center">
+                          <div className="w-[1.5px] h-1.5" style={{ backgroundColor: palette.bearish }} />
+                          <div className="w-2.5 h-3.5 rounded-[1px]" style={{ backgroundColor: palette.bearish }} />
+                          <div className="w-[1.5px] h-1.5" style={{ backgroundColor: palette.bearish }} />
+                        </div>
+                        <span className="text-[9px] font-mono font-bold" style={{ color: palette.bearish }}>
+                          DN
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 

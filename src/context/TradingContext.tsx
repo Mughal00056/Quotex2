@@ -9,6 +9,7 @@ import {
   DepositTransaction,
   WithdrawalTransaction,
   ChartType,
+  CandleColorScheme,
   IndicatorSettings,
   MarketBehaviorMode,
   DrawnLine,
@@ -17,6 +18,8 @@ import {
 } from '../types/trading';
 import { INITIAL_ASSETS, generateHistoricalCandles } from '../constants/assets';
 import { sounds } from '../utils/audio';
+
+const ONE_DAY_MS = 24 * 60 * 60 * 1000; // 24 hours (1 day) retention for trades
 
 interface TradingContextType {
   // Accounts
@@ -38,6 +41,8 @@ interface TradingContextType {
   setTimeframe: (seconds: number) => void;
   chartType: ChartType;
   setChartType: (type: ChartType) => void;
+  candleColorScheme: CandleColorScheme;
+  setCandleColorScheme: (scheme: CandleColorScheme) => void;
   indicators: IndicatorSettings;
   setIndicators: React.Dispatch<React.SetStateAction<IndicatorSettings>>;
 
@@ -77,6 +82,7 @@ interface TradingContextType {
   // Trading Actions
   activeTrades: Trade[];
   tradeHistory: Trade[];
+  removeTradeFromHistory: (id: string) => void;
   placeTrade: (direction: TradeDirection, amount: number, durationSeconds: number) => boolean;
   lastClosedTrade: Trade | null;
   clearLastClosedTrade: () => void;
@@ -125,6 +131,7 @@ const STORAGE_KEYS = {
   TRADER_FLAG: 'quotex_trader_flag',
   CUSTOM_LB_PROFIT: 'quotex_custom_lb_profit',
   CUSTOM_LB_RANK: 'quotex_custom_lb_rank',
+  CANDLE_COLOR_SCHEME: 'quotex_candle_color_scheme',
 };
 
 export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -163,6 +170,15 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, []);
 
   const [chartType, setChartType] = useState<ChartType>('candlestick');
+  const [candleColorScheme, setCandleColorSchemeState] = useState<CandleColorScheme>(() => {
+    const saved = localStorage.getItem(STORAGE_KEYS.CANDLE_COLOR_SCHEME) as CandleColorScheme;
+    return saved || 'classic';
+  });
+
+  const setCandleColorScheme = useCallback((scheme: CandleColorScheme) => {
+    setCandleColorSchemeState(scheme);
+    localStorage.setItem(STORAGE_KEYS.CANDLE_COLOR_SCHEME, scheme);
+  }, []);
   const [indicators, setIndicators] = useState<IndicatorSettings>({
     sma: true,
     smaPeriod: 10,
@@ -275,17 +291,36 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const candles = assetCandlesMap[activeAsset.id] || generateHistoricalCandles(activeAsset, 60, 180);
 
-  // 7. Trades & Drawing Tools
+  // 7. Trades & Drawing Tools (Trades stay for 1 day / 24 hours then auto-remove)
   const [activeTrades, setActiveTrades] = useState<Trade[]>([]);
   const [tradeHistory, setTradeHistory] = useState<Trade[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEYS.TRADE_HISTORY);
-      return saved ? JSON.parse(saved) : [];
+      if (!saved) return [];
+      const parsed: Trade[] = JSON.parse(saved);
+      const cutoff = Date.now() - ONE_DAY_MS;
+      return parsed.filter((t) => (t.closeTime || t.openTime) >= cutoff);
     } catch {
       return [];
     }
   });
   const [lastClosedTrade, setLastClosedTrade] = useState<Trade | null>(null);
+
+  const removeTradeFromHistory = useCallback((id: string) => {
+    setTradeHistory((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  // Automatically purge any trade older than 1 day (24 hours)
+  useEffect(() => {
+    const pruneInterval = setInterval(() => {
+      const cutoff = Date.now() - ONE_DAY_MS;
+      setTradeHistory((prev) => {
+        const filtered = prev.filter((t) => (t.closeTime || t.openTime) >= cutoff);
+        return filtered.length !== prev.length ? filtered : prev;
+      });
+    }, 30000);
+    return () => clearInterval(pruneInterval);
+  }, []);
 
   // Per-trade target outcome map for 'realistic' mode (mix of win and lose)
   const tradeOutcomeTargetRef = useRef<Record<string, 'WIN' | 'LOSS'>>({});
@@ -955,6 +990,8 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setTimeframe,
         chartType,
         setChartType,
+        candleColorScheme,
+        setCandleColorScheme,
         indicators,
         setIndicators,
         isOnlineMode,
@@ -963,6 +1000,7 @@ export const TradingProvider: React.FC<{ children: React.ReactNode }> = ({ child
         setMarketBehaviorMode,
         activeTrades,
         tradeHistory,
+        removeTradeFromHistory,
         placeTrade,
         lastClosedTrade,
         clearLastClosedTrade,
